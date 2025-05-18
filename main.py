@@ -60,13 +60,10 @@ def fetch_batch_data(skus, date_str):
     payload = {"d": date_str, "skus": ",".join(str(sku) for sku in skus)}
 
     try:
-        response = requests.post(
+        response = requests.get(
             url,
-            headers={
-                "X-Mpstats-TOKEN": API_KEY,
-                "Content-Type": "application/json"
-            },
-            json=payload,
+            headers={"X-Mpstats-TOKEN": API_KEY},
+            params=payload,
             timeout=15
         )
 
