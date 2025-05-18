@@ -189,6 +189,7 @@ if __name__ == "__main__":
         print("Ошибка: Необходимо установить GOOGLE_SHEETS_URL и MPSTATS_API_KEY в .env")
         exit(1)
 
+    daily_collect()
 
     # Настройка расписания
     schedule.every().day.at("08:00").do(daily_collect)
