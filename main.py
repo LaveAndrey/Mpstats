@@ -8,7 +8,7 @@ import schedule
 from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import json
 
 # Настройка логирования
@@ -32,6 +32,7 @@ BASE_URL = 'https://mpstats.io/api/wb/get/item'
 REQUEST_DELAY = 1  # Задержка между запросами (в секундах)
 MAX_RETRIES = 3
 MAX_REQUESTS_PER_MINUTE = 100  # Лимит API
+BATCH_INSERT_SIZE = 20  # Количество записей для единовременной вставки
 
 
 class MpStatsAPIError(Exception):
@@ -111,11 +112,25 @@ def prepare_row_data(item_data: Dict, date_str: str, sku: str) -> List:
     ]
 
 
+def insert_batch_to_sheet(worksheet, batch_data: List[List]):
+    """Вставка пачки данных в таблицу"""
+    if not batch_data:
+        return
+
+    try:
+        worksheet.append_rows(batch_data)
+        logger.info(f"Успешно добавлено {len(batch_data)} записей")
+    except Exception as e:
+        logger.error(f"Ошибка при вставке данных: {str(e)}")
+        raise
+
+
 def process_skus(gc: gspread.Client, skus: List[str], date_str: str):
-    """Обработка всех артикулов по одному"""
+    """Обработка всех артикулов с накоплением пачек по 20 записей"""
     total_skus = len(skus)
     processed = 0
     request_count = 0
+    batch_data = []
 
     # Открываем таблицу один раз
     sheet = gc.open_by_url(SHEET_URL)
@@ -131,10 +146,15 @@ def process_skus(gc: gspread.Client, skus: List[str], date_str: str):
             item_data = fetch_item_data(sku, date_str)
 
             if item_data:
-                # Подготавливаем и добавляем данные
+                # Подготавливаем данные и добавляем в пачку
                 row_data = prepare_row_data(item_data, date_str, sku)
-                data_ws.append_row(row_data)
-                logger.info(f"Добавлены данные для артикула {sku}")
+                batch_data.append(row_data)
+                logger.info(f"Данные для артикула {sku} добавлены в пачку")
+
+                # Если накопили 20 записей - вставляем
+                if len(batch_data) >= BATCH_INSERT_SIZE:
+                    insert_batch_to_sheet(data_ws, batch_data)
+                    batch_data = []  # Очищаем пачку
 
             # Соблюдаем лимиты API
             if request_count >= MAX_REQUESTS_PER_MINUTE:
@@ -147,6 +167,10 @@ def process_skus(gc: gspread.Client, skus: List[str], date_str: str):
         except Exception as e:
             logger.error(f"Ошибка обработки артикула {sku}: {str(e)}")
             continue
+
+    # Вставляем оставшиеся данные (если есть)
+    if batch_data:
+        insert_batch_to_sheet(data_ws, batch_data)
 
 
 def daily_collect():
