@@ -68,8 +68,14 @@ def fetch_item_data(sku: str, target_date: str) -> Optional[Dict]:
     url = f"{BASE_URL}/{sku}/balance_by_day"
     headers = {"X-Mpstats-TOKEN": API_KEY}
 
+    from_date = (datetime.strptime(target_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+    params = {
+        "date_from": from_date,
+        "date_to": target_date
+    }
+
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, params=params, timeout=15)
         if response.status_code == 429:
             retry_after = int(response.headers.get('Retry-After', 60))
             logger.warning(f"Превышен лимит запросов. Пауза {retry_after} сек.")
@@ -81,19 +87,24 @@ def fetch_item_data(sku: str, target_date: str) -> Optional[Dict]:
         if not data:
             return None
 
-        # Парсим даты
         target_sales = 0
         prev_sales = 0
+        price = ""
+        final_price = ""
+
         for entry in data:
-            if entry.get("date") == target_date:
+            entry_date = entry.get("date")
+            if entry_date == target_date:
                 target_sales = entry.get("sales", 0)
-            elif entry.get("date") == (datetime.strptime(target_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"):
+                price = entry.get("price", "")
+                final_price = entry.get("final_price", "")
+            elif entry_date == from_date:
                 prev_sales = entry.get("sales", 0)
 
         return {
             "sales": target_sales - prev_sales,
-            "price": entry.get("price", ""),
-            "final_price": entry.get("final_price", "")
+            "price": price,
+            "final_price": final_price
         }
 
     except requests.RequestException as e:
