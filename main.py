@@ -60,22 +60,16 @@ def connect_google() -> gspread.Client:
 @retry(stop=stop_after_attempt(MAX_RETRIES),
        wait=wait_exponential(multiplier=1, min=2, max=10),
        reraise=True)
-def fetch_item_data(sku: str, date_str: str) -> Optional[Dict]:
-    """Запрос данных для одного артикула"""
+def fetch_item_data(sku: str, target_date: str) -> Optional[Dict]:
+    """Получить разницу продаж между target_date и днем ранее"""
     if not API_KEY:
         raise ValueError("API_KEY не установлен")
 
     url = f"{BASE_URL}/{sku}/balance_by_day"
-    params = {"d": date_str}
+    headers = {"X-Mpstats-TOKEN": API_KEY}
 
     try:
-        response = requests.get(
-            url,
-            headers={"X-Mpstats-TOKEN": API_KEY},
-            params=params,
-            timeout=15
-        )
-
+        response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 429:
             retry_after = int(response.headers.get('Retry-After', 60))
             logger.warning(f"Превышен лимит запросов. Пауза {retry_after} сек.")
@@ -84,16 +78,28 @@ def fetch_item_data(sku: str, date_str: str) -> Optional[Dict]:
 
         response.raise_for_status()
         data = response.json()
-
         if not data:
-            logger.warning(f"Нет данных для артикула {sku} на дату {date_str}")
             return None
 
-        return data[0]  # Возвращаем первый элемент списка
+        # Парсим даты
+        target_sales = 0
+        prev_sales = 0
+        for entry in data:
+            if entry.get("date") == target_date:
+                target_sales = entry.get("sales", 0)
+            elif entry.get("date") == (datetime.strptime(target_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"):
+                prev_sales = entry.get("sales", 0)
 
-    except requests.exceptions.RequestException as e:
+        return {
+            "sales": target_sales - prev_sales,
+            "price": entry.get("price", ""),
+            "final_price": entry.get("final_price", "")
+        }
+
+    except requests.RequestException as e:
         logger.error(f"Ошибка запроса для артикула {sku}: {str(e)}")
         raise MpStatsAPIError(f"Ошибка API: {str(e)}") from e
+
 
 
 def validate_skus(sku_list: List[str]) -> List[str]:
